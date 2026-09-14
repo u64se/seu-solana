@@ -243,6 +243,7 @@ program_entrypoint!(process_instruction, 2);
 
 pub const TAG_GENESIS: u8 = 0;
 pub const TAG_TRANSITION: u8 = 1;
+pub const TAG_BATCH: u8 = 2;
 
 pub fn process_instruction(
     _program_id: &Address,
@@ -257,7 +258,62 @@ pub fn process_instruction(
         }
     }
 
-    // wire: at least 5 bytes
+    // wire minimum length
+    if instruction_data.len() < 3 {
+        return Err(ProgramError::InvalidInstructionData);
+    }
+
+    // r1: Clock sysvar reading
+    let current_slot = match Clock::get() {
+        Ok(c) => (c.slot & 0xFFFF) as u16,
+        Err(_) => 100,
+    };
+
+    // TAG_BATCH (2): In-memory native multi-hop ALU pipeline
+    // Wire layout: [tag=2, role_byte, hop_count, (curr, tgt, fut) * hop_count]
+    if instruction_data[0] == TAG_BATCH {
+        let role_byte = instruction_data[1];
+        let hop_count = instruction_data[2] as usize;
+        if hop_count == 0 || instruction_data.len() < 3 + hop_count * 3 {
+            return Err(ProgramError::InvalidInstructionData);
+        }
+
+        let flags =
+            ((StateExecutionUnit::FLAG_ACYCLIC | StateExecutionUnit::FLAG_NO_SELF_LOOP) >> 48) as u16;
+        let mut status = (StateExecutionUnit::STATUS_ACTIVE >> 8) as u8;
+        status |= (StateExecutionUnit::FLAG_RING_TOPOLOGY >> 8) as u8;
+
+        let first_curr = instruction_data[3];
+        let first_tgt = instruction_data[4];
+
+        let mut seu = StateExecutionUnit::new(
+            role_byte,
+            status,
+            first_curr,
+            first_tgt,
+            current_slot,
+            flags,
+        );
+
+        for i in 0..hop_count {
+            let offset = 3 + i * 3;
+            let tgt = instruction_data[offset + 1];
+            let fut = instruction_data[offset + 2];
+
+            seu = seu
+                .execute_transition(role_byte as u64, tgt, fut, current_slot)
+                .map_err(|mask| ProgramError::Custom(mask.0 as u32))?;
+        }
+
+        #[cfg(any(target_os = "solana", target_arch = "bpf", target_arch = "sbf"))]
+        unsafe {
+            sol_set_return_data(seu.0.to_le_bytes().as_ptr(), 8);
+        }
+
+        return Ok(());
+    }
+
+    // Single-hop wire: at least 5 bytes
     if instruction_data.len() < 5 {
         return Err(ProgramError::InvalidInstructionData);
     }
@@ -283,12 +339,6 @@ pub fn process_instruction(
                 instruction_data[4],
             )
         };
-
-    // r1: Clock sysvar reading
-    let current_slot = match Clock::get() {
-        Ok(c) => (c.slot & 0xFFFF) as u16,
-        Err(_) => 100,
-    };
 
     let flags =
         ((StateExecutionUnit::FLAG_ACYCLIC | StateExecutionUnit::FLAG_NO_SELF_LOOP) >> 48) as u16;
@@ -514,6 +564,46 @@ mod tests {
         );
         let mask_rl = seu_rl.evaluate(StateExecutionUnit::ROLE_SWAP, 1, 101);
         assert_eq!(mask_rl.0 & FaultMask::RATE_LIMITED, FaultMask::RATE_LIMITED);
+    }
+
+    #[test]
+    fn test_batch_execution_5_hop_cycle() {
+        // Complete 5-hop Torus cycle in 1 batch instruction
+        // Wire: [tag=2, role=1, count=5, (curr, tgt, fut) * 5]
+        let wire = [
+            TAG_BATCH, StateExecutionUnit::ROLE_SWAP as u8, 5,
+            0, 1, 2, // hop 0: S0 -> S1 (fut S2)
+            1, 2, 3, // hop 1: S1 -> S2 (fut S3)
+            2, 3, 4, // hop 2: S2 -> S3 (fut S4)
+            3, 4, 0, // hop 3: S3 -> S4 (fut S0)
+            4, 0, 1, // hop 4: S4 -> S0 (fut S1, Torus Ring Wrap)
+        ];
+        let res = process_instruction(&Address::default(), &mut [], &wire);
+        assert!(res.is_ok());
+    }
+
+    #[test]
+    fn test_batch_execution_backward_violation_rejected() {
+        // Wire: hop 1 attempts forbidden backward jump (S2 -> S1)
+        let wire = [
+            TAG_BATCH, StateExecutionUnit::ROLE_SWAP as u8, 2,
+            0, 1, 2,
+            1, 2, 1, // S1 -> S2 with future S1 (< S2)
+        ];
+        let res = process_instruction(&Address::default(), &mut [], &wire);
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn test_batch_execution_self_loop_rejected() {
+        // Wire: hop 1 attempts forbidden stutter (S1 -> S1)
+        let wire = [
+            TAG_BATCH, StateExecutionUnit::ROLE_SWAP as u8, 2,
+            0, 1, 2,
+            1, 1, 2, // self loop S1 -> S1
+        ];
+        let res = process_instruction(&Address::default(), &mut [], &wire);
+        assert!(res.is_err());
     }
 }
 
