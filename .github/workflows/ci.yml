@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+    branches: [ master, main ]
+  workflow_dispatch:
+
+jobs:
+  formal-verification:
+    name: Z3 Formal Invariant Verification
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Z3 SMT Solver
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y z3
+
+      - name: Verify 8 Core Mathematical Invariants
+        run: |
+          echo "Running Z3 on verify_invariants.smt2..."
+          output=$(z3 verify_invariants.smt2)
+          echo "$output"
+          
+          # Count proven theorems (unsat)
+          unsat_count=$(echo "$output" | grep -c "^unsat$")
+          echo "Theorems proven: $unsat_count / 8"
+          if [ "$unsat_count" -ne 8 ]; then
+            echo "Error: Expected exactly 8 proven invariants (unsat), but got $unsat_count"
+            exit 1
+          fi
+
+  rust-test:
+    name: Rust Host ALU & Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Check compilation
+        run: cargo check --release
+
+      - name: Run unit tests
+        run: cargo test --release -- --nocapture
+
+      - name: Run host benchmark
+        run: cargo run --release --example benchmark
