@@ -1,5 +1,5 @@
 [book]
-authors = ["u64se Core Contributors", "Esense"]
+authors = ["u64se Core Contributors"]
 language = "en"
 src = "src"
 title = "u64se-seu-solana: Branchless 64-Bit State Execution Unit for Solana SVM"
