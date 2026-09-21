@@ -1,11 +1,18 @@
 # u64se-seu-solana
 
 [![CI](https://img.shields.io/github/actions/workflow/status/u64se/seu-solana/ci.yml?branch=main&style=flat-square&logo=github-actions&logoColor=white)](https://github.com/u64se/seu-solana/actions)
+[![Colosseum Hackathon](https://img.shields.io/badge/Colosseum-Flagship__Submission-orange?style=flat-square)](https://seu-solana.rag.engineering)
 [![State Size](https://img.shields.io/badge/state__size-8__bytes__(u64)-007acc?style=flat-square)](#specification)
 [![ALU Cost](https://img.shields.io/badge/ALU__cost-~8__CU-brightgreen?style=flat-square)](#specification)
-[![Status](https://img.shields.io/badge/status-experimental-yellow?style=flat-square)](#status--security-notice)
+[![Binary Size](https://img.shields.io/badge/SBF__size-4%2C720__bytes-blueviolet?style=flat-square)](#specification)
+[![Devnet](https://img.shields.io/badge/Solana-Devnet__Live-14F195?style=flat-square&logo=solana&logoColor=black)](https://solana.fm/address/FCm2jTA6aiWqrfgtJQgBEZ5dyY9cfBXP8jas3TMTs19H?cluster=devnet-solana)
 
-Branchless 64-bit State Execution Unit (SEU) for Solana SVM.
+Branchless 64-bit State Execution Unit (SEU) for Solana SVM.  
+**Superteam Ukraine · Colosseum Global Hackathon Flagship Submission** (Infrastructure & Developer Tooling).
+
+- **Live Showcase**: [seu-solana.rag.engineering](https://seu-solana.rag.engineering)
+- **SVM Workbench**: [u64se.rag.engineering](https://u64se.rag.engineering)
+- **Verified Devnet Program**: [`FCm2jTA6aiWqrfgtJQgBEZ5dyY9cfBXP8jas3TMTs19H`](https://solana.fm/address/FCm2jTA6aiWqrfgtJQgBEZ5dyY9cfBXP8jas3TMTs19H?cluster=devnet-solana)
 
 ```
 +-------------------+-------------------+-------------------+-------------------+
@@ -73,7 +80,7 @@ cargo run --release --example benchmark
 - **State Size**: exactly 8 bytes (`u64` register word)
 - **Branching**: 0 conditional branches in ALU evaluation ($O(1)$ constant time)
 - **Heap Allocation**: 0 bytes (enforced at compile-time via `no_allocator!`)
-- **Binary Size**: **5,968 bytes** (stripped ELF shared object)
+- **Binary Size**: **4,720 bytes** (stripped ELF SBF)
 - **Compute Units (CU)**:
   - **ALU Core**: **~8 CU** (pure register transition)
   - **End-to-End Onchain**: **< 1,900 CU** (includes signer auth, PDA derivation, Clock sysvar, and return data)
@@ -216,7 +223,7 @@ Validated environment:
 cargo-build-sbf
 ```
 
-Produces an ultra-compact **5,968 bytes** stripped ELF shared object `target/deploy/u64se-seu-solana.so`.
+Produces an ultra-compact **4,720 bytes** stripped ELF SBF binary `target/deploy/u64se-seu-solana.so`.
 
 ---
 
