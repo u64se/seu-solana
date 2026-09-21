@@ -30,7 +30,7 @@ pub static SECURITY_TXT: &str = concat!(
     "project_url\0https://github.com/u64se/seu-solana\0",
     "contacts\0link:https://github.com/u64se/seu-solana/security/advisories/new,email:security@rag.engineering\0",
     "policy\0https://github.com/u64se/seu-solana/blob/main/SECURITY.md\0",
-    "preferred_languages\0en,ru\0",
+    "preferred_languages\0en,ua\0",
     "source_code\0https://github.com/u64se/seu-solana\0",
     "auditors\0Z3 SMT Solver (QF_BV Formal Invariants), Mollusk SVM\0",
     "=======END SECURITY.TXT V1=======\0"
