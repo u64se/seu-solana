@@ -1,0 +1,13 @@
+[book]
+authors = ["u64se Core Contributors", "Esense"]
+language = "en"
+src = "src"
+title = "u64se-seu-solana: Branchless 64-Bit State Execution Unit for Solana SVM"
+description = "Hardware-enforced 64-bit state execution unit, 8 CU ALU pipeline, and formal Z3 SMT invariants on Solana"
+
+[output.html]
+default-theme = "rust"
+preferred-dark-theme = "navy"
+mathjax-support = true
+git-repository-url = "https://github.com/u64se/seu-solana"
+git-repository-icon = "fab-github"

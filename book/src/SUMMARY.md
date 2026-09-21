@@ -1,0 +1,22 @@
+# Summary
+
+[Introduction: u64se-seu-solana](introduction.md)
+
+- [Core Architecture](architecture.md)
+  - [64-Bit State Execution Register](register_layout.md)
+  - [Branchless ALU Pipeline](branchless_alu.md)
+  - [FaultMask Bitfield (0x00..0x80)](fault_mask.md)
+- [Solana SVM Integration](svm_integration.md)
+  - [Zero-Rent & Zero-Contention Model](stateless_concurrency.md)
+  - [5-Byte Instruction Wire ABI](instruction_abi.md)
+  - [Pinocchio Runtime (4,720 B SBF)](pinocchio_runtime.md)
+  - [Compute Unit Profile (~8 CU vs Anchor)](cu_profile.md)
+- [Formal Verification](formal_verification.md)
+  - [Z3 SMT-LIB2 Theorems (QF_BV)](z3_theorems.md)
+  - [Mathematical Bit-Vector Invariants](bit_invariants.md)
+- [Security & Dual Mental Models](security_models.md)
+  - [Session Passport vs Circuit Breaker](dual_mental_models.md)
+  - [Recovery Drain & Grace Timeout](drain_recovery.md)
+- [Live Devnet Verification](devnet_proofs.md)
+  - [Verified Program & Atomic Batch Transactions](onchain_receipts.md)
+  - [Developer Quickstart & CLI](quickstart.md)

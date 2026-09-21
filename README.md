@@ -2,6 +2,7 @@
 
 [![CI](https://img.shields.io/github/actions/workflow/status/u64se/seu-solana/ci.yml?branch=main&style=flat-square&logo=github-actions&logoColor=white)](https://github.com/u64se/seu-solana/actions)
 [![Colosseum Hackathon](https://img.shields.io/badge/Colosseum-Flagship__Submission-orange?style=flat-square)](https://seu-solana.rag.engineering)
+[![Docs](https://img.shields.io/badge/docs-docs.u64se.rag.engineering-blue?style=flat-square)](https://docs.u64se.rag.engineering)
 [![State Size](https://img.shields.io/badge/state__size-8__bytes__(u64)-007acc?style=flat-square)](#specification)
 [![ALU Cost](https://img.shields.io/badge/ALU__cost-~8__CU-brightgreen?style=flat-square)](#specification)
 [![Binary Size](https://img.shields.io/badge/SBF__size-4%2C720__bytes-blueviolet?style=flat-square)](#specification)
@@ -12,6 +13,7 @@ Branchless 64-bit State Execution Unit (SEU) for Solana SVM.
 
 - **Live Showcase**: [seu-solana.rag.engineering](https://seu-solana.rag.engineering)
 - **SVM Workbench**: [u64se.rag.engineering](https://u64se.rag.engineering)
+- **Documentation**: [docs.u64se.rag.engineering](https://docs.u64se.rag.engineering)
 - **Verified Devnet Program**: [`FCm2jTA6aiWqrfgtJQgBEZ5dyY9cfBXP8jas3TMTs19H`](https://solana.fm/address/FCm2jTA6aiWqrfgtJQgBEZ5dyY9cfBXP8jas3TMTs19H?cluster=devnet-solana)
 
 ```
