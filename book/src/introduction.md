@@ -2,18 +2,14 @@
 
 `u64se-seu-solana` is a **Branchless 64-Bit State Execution Unit (SEU)** engineered for autonomous AI agents, machine-to-machine (M2M) micro-settlements, and high-frequency state verification on the Solana Sealevel Virtual Machine (SVM).
 
-```
-+-------------------------------------------------------------------+
-|               64-BIT SCALAR HARDWARE INVARIANT REGISTER           |
-|-------------------------------------------------------------------|
-| [0..7]   AUTH_ROLES        (single-hot authorization bitmask)     |
-| [8..15]  STATUS_FLAGS      (active: 0x01, paused: 0x02, ring: 0x80) |
-| [16..23] CURRENT_NODE      (FSM state coordinate S_i: 0..255)     |
-| [24..31] TARGET_NODE       (FSM state coordinate S_{i+1}: 0..255) |
-| [32..47] EPOCH_SLOT        (16-bit bounded temporal anchor)       |
-| [48..63] TOPOLOGY_FLAGS    (acyclic: 0x01, no-self-loop: 0x02)    |
-+-------------------------------------------------------------------+
-```
+| Bits | Register Field | Invariant & Bitmask Description |
+| :--- | :--- | :--- |
+| `[0..7]` | **`AUTH_ROLES`** | Single-hot authorization bitmask (`0x01`..`0x80`) |
+| `[8..15]` | **`STATUS_FLAGS`** | Active (`0x01`), Paused (`0x02`), Ring buffer (`0x80`) |
+| `[16..23]` | **`CURRENT_NODE`** | FSM state coordinate $S_i \in [0..255]$ |
+| `[24..31]` | **`TARGET_NODE`** | FSM state coordinate $S_{i+1} \in [0..255]$ |
+| `[32..47]` | **`EPOCH_SLOT`** | 16-bit bounded temporal slot anchor |
+| `[48..63]` | **`TOPOLOGY_FLAGS`** | Acyclic DAG (`0x01`), No Self-Loop (`0x02`) |
 
 ---
 
