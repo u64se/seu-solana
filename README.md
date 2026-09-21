@@ -14,7 +14,7 @@ Branchless 64-bit State Execution Unit (SEU) for Solana SVM.
 - **Live Showcase**: [seu-solana.rag.engineering](https://seu-solana.rag.engineering)
 - **SVM Workbench**: [u64se.rag.engineering](https://u64se.rag.engineering)
 - **Documentation**: [docs.u64se.rag.engineering](https://docs.u64se.rag.engineering)
-- **Verified Devnet Program**: [`FCm2jTA6aiWqrfgtJQgBEZ5dyY9cfBXP8jas3TMTs19H`](https://solana.fm/address/FCm2jTA6aiWqrfgtJQgBEZ5dyY9cfBXP8jas3TMTs19H?cluster=devnet-solana)
+- **Live Devnet Program**: [`FCm2jTA6aiWqrfgtJQgBEZ5dyY9cfBXP8jas3TMTs19H`](https://solana.fm/address/FCm2jTA6aiWqrfgtJQgBEZ5dyY9cfBXP8jas3TMTs19H?cluster=devnet-solana)
 
 ```
 +-------------------+-------------------+-------------------+-------------------+
