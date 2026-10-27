@@ -143,6 +143,12 @@ impl StateExecutionUnit {
     }
 
     #[inline(always)]
+    pub const fn with_epoch_slot(&self, slot: u16) -> Self {
+        let cleared = self.0 & !(Self::EPOCH_SLOT_MASK << Self::EPOCH_SLOT_SHIFT);
+        Self(cleared | (((slot as u64) & Self::EPOCH_SLOT_MASK) << Self::EPOCH_SLOT_SHIFT))
+    }
+
+    #[inline(always)]
     pub const fn current_node(&self) -> u8 {
         ((self.0 >> Self::CURRENT_NODE_SHIFT) & Self::NODE_BYTE_MASK) as u8
     }
