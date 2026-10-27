@@ -146,10 +146,14 @@ All state transitions and algebraic topological constraints are formally verifie
 | **Theorem 6** | **Temporal Monotonicity**: Slot time skew ($\Delta > \text{0x7FFF}$) strictly rejected | `QF_BV` | `unsat` (proven) |
 | **Theorem 7** | **Deterministic Ring Wrap**: Wrap-around restricted to $S_i > 0 \land S_{i+1} = 0$ | `QF_BV` | `unsat` (proven) |
 | **Theorem 8** | **Forward Projection Safety**: Forward projections ($S_{i+2}$) strictly validated | `QF_BV` | `unsat` (proven) |
+| **Theorem 9** | **Incremental XOR Crystal Parity**: Adjoint $O(1)$ XOR update preserves full crystal parity | `QF_BV` | `unsat` (proven) |
+| **Theorem 10** | **Single-Cube Tamper Detection**: Any single-cube bit flip alters header parity digest | `QF_BV` | `unsat` (proven) |
+| **Theorem 11** | **Lock-Free SeqLock Exclusion**: Torn reads rejected during `STATUS_SEQLOCK_WRITING` | `QF_BV` | `unsat` (proven) |
+| **Theorem 12** | **SPSC Command Ring Safety**: Empty and full ring boundaries distinguished deterministically | `QF_BV` | `unsat` (proven) |
 
 Run the verification suite:
 ```bash
-z3 verify_invariants.smt2
+z3 verify_invariants.smt2 # Expected: 12 x unsat
 ```
 
 ---

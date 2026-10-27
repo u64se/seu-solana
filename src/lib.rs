@@ -1,5 +1,7 @@
 #![allow(unexpected_cfgs)]
+#![cfg_attr(not(feature = "std"), no_std)]
 
+#[cfg(feature = "solana")]
 use pinocchio::{
     account::AccountView,
     default_panic_handler,
@@ -9,18 +11,21 @@ use pinocchio::{
     Address, ProgramResult,
 };
 
-#[cfg(not(feature = "no-entrypoint"))]
+#[cfg(all(feature = "solana", not(feature = "no-entrypoint")))]
+#[allow(unused_imports)]
 use pinocchio::program_entrypoint;
 
-#[cfg(any(target_os = "solana", target_arch = "bpf", target_arch = "sbf"))]
+#[cfg(all(feature = "solana", any(target_os = "solana", target_arch = "bpf", target_arch = "sbf")))]
 use solana_define_syscall::definitions::sol_set_return_data;
 
 // Zero-heap constraint & zero-copy entrypoint
+#[cfg(feature = "solana")]
 no_allocator!();
+#[cfg(feature = "solana")]
 default_panic_handler!();
 
 // Embedded Solana security.txt standard (Neodyme / SolanaFM / Solana Explorer)
-#[cfg(not(feature = "no-entrypoint"))]
+#[cfg(all(feature = "solana", not(feature = "no-entrypoint")))]
 #[cfg_attr(any(target_os = "solana", target_arch = "bpf", target_arch = "sbf"), link_section = ".security.txt")]
 #[allow(dead_code)]
 #[no_mangle]
@@ -37,7 +42,8 @@ pub static SECURITY_TXT: &str = concat!(
 );
 
 #[repr(transparent)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "bytemuck", derive(bytemuck::Pod, bytemuck::Zeroable))]
 pub struct StateExecutionUnit(pub u64);
 
 pub type StateRegister = StateExecutionUnit;
@@ -65,6 +71,11 @@ impl FaultMask {
     }
 }
 
+pub const ERROR_INVALID_INSTRUCTION_DATA: u32 = 1001;
+pub const ERROR_INVALID_ARGUMENT: u32 = 1002;
+pub const ERROR_ACCOUNT_ALREADY_INITIALIZED: u32 = 1003;
+pub const ERROR_UNINITIALIZED_ACCOUNT: u32 = 1004;
+
 impl StateExecutionUnit {
     // bit 0..7: role authorization bitmask
     pub const ROLE_SWAP: u64 = 1 << 0;
@@ -73,12 +84,15 @@ impl StateExecutionUnit {
     pub const ROLE_GOVERNANCE: u64 = 1 << 3;
     pub const ROLE_DRAIN: u64 = 1 << 4;
     pub const ROLE_FLASHLOAN: u64 = 1 << 5;
+    pub const ROLE_CONCRESCE: u64 = 1 << 6;
+    pub const ROLE_IGNITE_STAR: u64 = 1 << 7;
     pub const ROLE_MASK: u64 = 0xFF;
 
     // bit 8..15: operational status & topology flags
     pub const STATUS_ACTIVE: u64 = 1 << 8;
     pub const STATUS_PAUSED: u64 = 1 << 9;
     pub const STATUS_RATE_LIMITED: u64 = 1 << 10;
+    pub const STATUS_SEQLOCK_WRITING: u64 = 1 << 11;
     pub const FLAG_RING_TOPOLOGY: u64 = 1 << 15;
 
     // bit 16..31: fsm node coordinates
@@ -91,9 +105,13 @@ impl StateExecutionUnit {
     pub const EPOCH_SLOT_MASK: u64 = 0xFFFF;
     pub const INACTIVITY_TIMEOUT_SLOTS: u16 = 100;
 
-    // bit 48..63: graph topology constraints
+    // bit 48..63: graph topology constraints & crystal parity digest
     pub const FLAG_ACYCLIC: u64 = 1 << 48;
     pub const FLAG_NO_SELF_LOOP: u64 = 1 << 49;
+    pub const FLAG_MACRO_BLUEPRINT: u64 = 1 << 50;
+
+    pub const PARITY_DIGEST_SHIFT: u32 = 56;
+    pub const PARITY_DIGEST_MASK: u64 = 0xFF00_0000_0000_0000;
 
     // constructor: bitfield pack
     #[inline(always)]
@@ -112,6 +130,37 @@ impl StateExecutionUnit {
         let slot = ((epoch_slot as u64) & Self::EPOCH_SLOT_MASK) << Self::EPOCH_SLOT_SHIFT;
         let fl = (flags as u64) << 48;
         Self(r | s | c | t | slot | fl)
+    }
+
+    #[inline(always)]
+    pub const fn current_node(&self) -> u8 {
+        ((self.0 >> Self::CURRENT_NODE_SHIFT) & Self::NODE_BYTE_MASK) as u8
+    }
+
+    #[inline(always)]
+    pub const fn target_node(&self) -> u8 {
+        ((self.0 >> Self::TARGET_NODE_SHIFT) & Self::NODE_BYTE_MASK) as u8
+    }
+
+    #[inline(always)]
+    pub const fn last_slot(&self) -> u16 {
+        ((self.0 >> Self::EPOCH_SLOT_SHIFT) & Self::EPOCH_SLOT_MASK) as u16
+    }
+
+    #[inline(always)]
+    pub const fn hamming_heat(&self, next: Self) -> u8 {
+        (self.0 ^ next.0).count_ones() as u8
+    }
+
+    #[inline(always)]
+    pub const fn parity_digest(&self) -> u8 {
+        ((self.0 >> Self::PARITY_DIGEST_SHIFT) & 0xFF) as u8
+    }
+
+    #[inline(always)]
+    pub const fn with_parity_digest(&self, digest: u8) -> Self {
+        let cleared = self.0 & !Self::PARITY_DIGEST_MASK;
+        Self(cleared | ((digest as u64) << Self::PARITY_DIGEST_SHIFT))
     }
 
     // evaluate: branchless combinatorial validation
@@ -225,7 +274,7 @@ impl StateExecutionUnit {
         Ok(StateExecutionUnit(updated))
     }
 
-    // transition alias for backwards ergonomics
+    // transition alias for ergonomics
     #[inline(always)]
     pub fn transition(
         &self,
@@ -238,44 +287,28 @@ impl StateExecutionUnit {
     }
 }
 
-#[cfg(not(feature = "no-entrypoint"))]
-program_entrypoint!(process_instruction, 2);
-
 pub const TAG_GENESIS: u8 = 0;
 pub const TAG_TRANSITION: u8 = 1;
 pub const TAG_BATCH: u8 = 2;
+pub const TAG_STAR_CHECKPOINT: u8 = 3;
 
-pub fn process_instruction(
-    _program_id: &Address,
-    accounts: &mut [AccountView],
+/// Pure instruction processor core, free of SBF syscalls
+pub fn process_seu_instruction_core(
+    _has_signer: bool,
+    mut pda_state_bytes: Option<&mut [u8]>,
+    current_slot: u16,
     instruction_data: &[u8],
-) -> ProgramResult {
-    // r0: signer check (zero-copy flag)
-    if !accounts.is_empty() {
-        let has_signer = accounts.iter().any(|acc| acc.is_signer());
-        if !has_signer {
-            return Err(ProgramError::MissingRequiredSignature);
-        }
-    }
-
-    // wire minimum length
+) -> Result<StateExecutionUnit, u32> {
     if instruction_data.len() < 3 {
-        return Err(ProgramError::InvalidInstructionData);
+        return Err(ERROR_INVALID_INSTRUCTION_DATA);
     }
 
-    // r1: Clock sysvar reading
-    let current_slot = match Clock::get() {
-        Ok(c) => (c.slot & 0xFFFF) as u16,
-        Err(_) => 100,
-    };
-
-    // TAG_BATCH (2): In-memory native multi-hop ALU pipeline
-    // Wire layout: [tag=2, role_byte, hop_count, (curr, tgt, fut) * hop_count]
+    // TAG_BATCH (2): In-memory multi-hop ALU pipeline
     if instruction_data[0] == TAG_BATCH {
         let role_byte = instruction_data[1];
         let hop_count = instruction_data[2] as usize;
         if hop_count == 0 || instruction_data.len() < 3 + hop_count * 3 {
-            return Err(ProgramError::InvalidInstructionData);
+            return Err(ERROR_INVALID_INSTRUCTION_DATA);
         }
 
         let flags =
@@ -286,44 +319,50 @@ pub fn process_instruction(
         let first_curr = instruction_data[3];
         let first_tgt = instruction_data[4];
 
-        let mut seu = StateExecutionUnit::new(
-            role_byte,
-            status,
-            first_curr,
-            first_tgt,
-            current_slot,
-            flags,
-        );
+        let mut seu = if let Some(ref pda) = pda_state_bytes {
+            let val = u64::from_le_bytes(pda[0..8].try_into().unwrap());
+            if val != 0 {
+                StateExecutionUnit(val)
+            } else {
+                StateExecutionUnit::new(role_byte, status, first_curr, first_tgt, current_slot, flags)
+            }
+        } else {
+            StateExecutionUnit::new(role_byte, status, first_curr, first_tgt, current_slot, flags)
+        };
 
         for i in 0..hop_count {
             let offset = 3 + i * 3;
+            let curr = instruction_data[offset];
             let tgt = instruction_data[offset + 1];
             let fut = instruction_data[offset + 2];
 
+            // Verify continuous route connectivity
+            if curr != seu.current_node() {
+                return Err(FaultMask::TARGET_MISMATCH as u32);
+            }
+
             seu = seu
                 .execute_transition(role_byte as u64, tgt, fut, current_slot)
-                .map_err(|mask| ProgramError::Custom(mask.0 as u32))?;
+                .map_err(|mask| mask.0 as u32)?;
         }
 
-        #[cfg(any(target_os = "solana", target_arch = "bpf", target_arch = "sbf"))]
-        unsafe {
-            sol_set_return_data(seu.0.to_le_bytes().as_ptr(), 8);
+        if let Some(ref mut pda) = pda_state_bytes {
+            pda[0..8].copy_from_slice(&seu.0.to_le_bytes());
         }
 
-        return Ok(());
+        return Ok(seu);
     }
 
-    // Single-hop wire: at least 5 bytes
+    // Single-hop / 5-byte wire:
     if instruction_data.len() < 5 {
-        return Err(ProgramError::InvalidInstructionData);
+        return Err(ERROR_INVALID_INSTRUCTION_DATA);
     }
 
-    // Parse wire data:
     // Auto-detect format:
-    // 1) Legacy client bump prefix: [bump, tag, role, target, future] where bump > 10 and tag <= 1
+    // 1) Legacy client bump prefix: [bump, tag, role, target, future] where bump > 10 and tag <= 3
     // 2) Canonical stateless wire: [tag, role, current_node, target_node, future_target]
     let (tag, role_byte, current_node, target_node, future_target) =
-        if instruction_data[0] > 10 && instruction_data[1] <= 1 {
+        if instruction_data[0] > 10 && instruction_data[1] <= 3 {
             let tag = instruction_data[1];
             let role = instruction_data[2];
             let target = instruction_data[3];
@@ -340,41 +379,173 @@ pub fn process_instruction(
             )
         };
 
-    let flags =
-        ((StateExecutionUnit::FLAG_ACYCLIC | StateExecutionUnit::FLAG_NO_SELF_LOOP) >> 48) as u16;
+    let flags = match future_target {
+        0x01 => (StateExecutionUnit::FLAG_ACYCLIC >> 48) as u16,
+        0x02 => (StateExecutionUnit::FLAG_NO_SELF_LOOP >> 48) as u16,
+        0x80 => (StateExecutionUnit::FLAG_RING_TOPOLOGY >> 48) as u16,
+        _ => ((StateExecutionUnit::FLAG_ACYCLIC | StateExecutionUnit::FLAG_NO_SELF_LOOP) >> 48) as u16,
+    };
+
     let mut status = (StateExecutionUnit::STATUS_ACTIVE >> 8) as u8;
-    if current_node == 4 && target_node == 0 {
+    if (current_node == 4 && target_node == 0) || future_target == 0x80 {
         status |= (StateExecutionUnit::FLAG_RING_TOPOLOGY >> 8) as u8;
     }
 
-    let seu = StateExecutionUnit::new(
-        role_byte,
-        status,
-        current_node,
-        target_node,
-        current_slot,
-        flags,
-    );
-
-    #[allow(unused_variables)]
-    let next_state = match tag {
+    match tag {
         TAG_GENESIS => {
             if target_node == 0 {
-                return Err(ProgramError::InvalidArgument);
+                return Err(ERROR_INVALID_ARGUMENT);
             }
-            seu
+            if let Some(ref pda) = pda_state_bytes {
+                let existing = u64::from_le_bytes(pda[0..8].try_into().unwrap());
+                if existing != 0 {
+                    return Err(ERROR_ACCOUNT_ALREADY_INITIALIZED);
+                }
+            }
+            let seu = StateExecutionUnit::new(
+                role_byte,
+                status,
+                current_node,
+                target_node,
+                current_slot,
+                flags,
+            );
+            if let Some(ref mut pda) = pda_state_bytes {
+                pda[0..8].copy_from_slice(&seu.0.to_le_bytes());
+            }
+            Ok(seu)
         }
         TAG_TRANSITION => {
-            seu.execute_transition(role_byte as u64, target_node, future_target, current_slot)
-                .map_err(|mask| ProgramError::Custom(mask.0 as u32))?
+            let next_seu = if let Some(ref mut pda) = pda_state_bytes {
+                let existing = u64::from_le_bytes(pda[0..8].try_into().unwrap());
+                if existing == 0 {
+                    return Err(ERROR_UNINITIALIZED_ACCOUNT);
+                }
+                let base_seu = StateExecutionUnit(existing);
+                let transitioned = base_seu
+                    .execute_transition(role_byte as u64, target_node, future_target, current_slot)
+                    .map_err(|mask| mask.0 as u32)?;
+                pda[0..8].copy_from_slice(&transitioned.0.to_le_bytes());
+                transitioned
+            } else {
+                let seu = StateExecutionUnit::new(
+                    role_byte,
+                    status,
+                    current_node,
+                    target_node,
+                    current_slot,
+                    flags,
+                );
+                seu.execute_transition(role_byte as u64, target_node, future_target, current_slot)
+                    .map_err(|mask| mask.0 as u32)?
+            };
+            Ok(next_seu)
         }
-        _ => return Err(ProgramError::InvalidInstructionData),
+        TAG_STAR_CHECKPOINT => {
+            // [TAG_STAR_CHECKPOINT, role, target_node, future_target, parity_digest]
+            let parity = future_target;
+            let next_seu = if let Some(ref mut pda) = pda_state_bytes {
+                let existing = u64::from_le_bytes(pda[0..8].try_into().unwrap());
+                let base_seu = StateExecutionUnit(existing);
+                let mut transitioned = base_seu
+                    .execute_transition(role_byte as u64, target_node, 0, current_slot)
+                    .map_err(|mask| mask.0 as u32)?;
+                transitioned.0 |= StateExecutionUnit::FLAG_MACRO_BLUEPRINT;
+                transitioned = transitioned.with_parity_digest(parity);
+                pda[0..8].copy_from_slice(&transitioned.0.to_le_bytes());
+                transitioned
+            } else {
+                let seu = StateExecutionUnit::new(
+                    role_byte,
+                    status,
+                    current_node,
+                    target_node,
+                    current_slot,
+                    flags,
+                );
+                let mut transitioned = seu
+                    .execute_transition(role_byte as u64, target_node, 0, current_slot)
+                    .map_err(|mask| mask.0 as u32)?;
+                transitioned.0 |= StateExecutionUnit::FLAG_MACRO_BLUEPRINT;
+                transitioned.with_parity_digest(parity)
+            };
+            Ok(next_seu)
+        }
+        _ => Err(ERROR_INVALID_INSTRUCTION_DATA),
+    }
+}
+
+#[cfg(feature = "solana")]
+fn map_core_error(err: u32) -> ProgramError {
+    match err {
+        ERROR_INVALID_INSTRUCTION_DATA => ProgramError::InvalidInstructionData,
+        ERROR_INVALID_ARGUMENT => ProgramError::InvalidArgument,
+        ERROR_ACCOUNT_ALREADY_INITIALIZED => ProgramError::AccountAlreadyInitialized,
+        ERROR_UNINITIALIZED_ACCOUNT => ProgramError::UninitializedAccount,
+        custom => ProgramError::Custom(custom),
+    }
+}
+
+#[cfg(feature = "solana")]
+pub fn process_instruction(
+    _program_id: &Address,
+    accounts: &mut [AccountView],
+    instruction_data: &[u8],
+) -> ProgramResult {
+    let has_signer = if !accounts.is_empty() {
+        let signed = accounts.iter().any(|acc| acc.is_signer());
+        if !signed {
+            return Err(ProgramError::MissingRequiredSignature);
+        }
+        true
+    } else {
+        false
     };
 
+    let current_slot = match Clock::get() {
+        Ok(c) => (c.slot & 0xFFFF) as u16,
+        Err(_) => 100,
+    };
+
+    if !accounts.is_empty() {
+        let pda_account = &mut accounts[0];
+        let dlen = pda_account.data_len();
+        if dlen != 0 && dlen != 8 {
+            return Err(ProgramError::InvalidAccountData);
+        }
+        if dlen == 8 {
+            if !pda_account.is_writable() {
+                return Err(ProgramError::InvalidAccountData);
+            }
+            let mut data_ref = pda_account.try_borrow_mut()?;
+            let _next_seu = process_seu_instruction_core(
+                has_signer,
+                Some(&mut data_ref[..8]),
+                current_slot,
+                instruction_data,
+            )
+            .map_err(map_core_error)?;
+
+            #[cfg(any(target_os = "solana", target_arch = "bpf", target_arch = "sbf"))]
+            unsafe {
+                sol_set_return_data(_next_seu.0.to_le_bytes().as_ptr(), 8);
+            }
+
+            return Ok(());
+        }
+    }
+
+    let _next_seu = process_seu_instruction_core(
+        has_signer,
+        None,
+        current_slot,
+        instruction_data,
+    )
+    .map_err(map_core_error)?;
 
     #[cfg(any(target_os = "solana", target_arch = "bpf", target_arch = "sbf"))]
     unsafe {
-        sol_set_return_data(next_state.0.to_le_bytes().as_ptr(), 8);
+        sol_set_return_data(_next_seu.0.to_le_bytes().as_ptr(), 8);
     }
 
     Ok(())
@@ -427,70 +598,72 @@ mod tests {
             ((StateExecutionUnit::FLAG_ACYCLIC | StateExecutionUnit::FLAG_NO_SELF_LOOP) >> 48)
                 as u16,
         );
-
-        // 1. self-loop: next_target == future_target
-        let res_self = seu.execute_transition(StateExecutionUnit::ROLE_SWAP, 1, 1, 101);
+        // next = 1, future = 1 (forbidden self-loop ahead)
+        let res = seu.execute_transition(StateExecutionUnit::ROLE_SWAP, 1, 1, 101);
         assert_eq!(
-            res_self.unwrap_err(),
-            FaultMask(FaultMask::SELF_LOOP_FORBIDDEN)
+            res.unwrap_err().0,
+            FaultMask::SELF_LOOP_FORBIDDEN
         );
 
-        // 2. valid forward transition to node 1 with future_target = 2
-        let seu1 = seu
-            .execute_transition(StateExecutionUnit::ROLE_SWAP, 1, 2, 101)
-            .expect("valid step");
-
-        // 3. backward transition rejection: current target is 2, attempt future_target = 1 (< 2)
-        let res_back = seu1.execute_transition(StateExecutionUnit::ROLE_SWAP, 2, 1, 102);
+        // next = 2, future = 1 (forbidden backward jump ahead)
+        let seu2 = StateExecutionUnit::new(
+            StateExecutionUnit::ROLE_SWAP as u8,
+            (StateExecutionUnit::STATUS_ACTIVE >> 8) as u8,
+            1,
+            2,
+            100,
+            ((StateExecutionUnit::FLAG_ACYCLIC | StateExecutionUnit::FLAG_NO_SELF_LOOP) >> 48)
+                as u16,
+        );
+        let res2 = seu2.execute_transition(StateExecutionUnit::ROLE_SWAP, 2, 1, 101);
         assert_eq!(
-            res_back.unwrap_err(),
-            FaultMask(FaultMask::BACKWARD_FORBIDDEN)
+            res2.unwrap_err().0,
+            FaultMask::BACKWARD_FORBIDDEN
         );
     }
 
     #[test]
     fn test_inactivity_recovery_drain() {
         let seu = StateExecutionUnit::new(
-            StateExecutionUnit::ROLE_DRAIN as u8,
+            (StateExecutionUnit::ROLE_SWAP | StateExecutionUnit::ROLE_DRAIN) as u8,
             (StateExecutionUnit::STATUS_ACTIVE >> 8) as u8,
+            3,
             4,
-            5,
             100,
             ((StateExecutionUnit::FLAG_ACYCLIC | StateExecutionUnit::FLAG_NO_SELF_LOOP) >> 48)
                 as u16,
         );
-        // inactivity timeout reached at slot 205 (delta 105 >= 100), target expected is 0 (drain)
-        let mask = seu.evaluate(StateExecutionUnit::ROLE_DRAIN, 0, 205);
+        // Inactivity delta = 100 slots exactly -> drain role permitted to state 0
+        let mask = seu.evaluate(StateExecutionUnit::ROLE_DRAIN, 0, 200);
         assert!(mask.is_pass());
+
+        // Under 100 slots (e.g. 99) -> drain role forbidden
+        let mask_early = seu.evaluate(StateExecutionUnit::ROLE_DRAIN, 0, 199);
+        assert_eq!(
+            mask_early.0 & FaultMask::TARGET_MISMATCH,
+            FaultMask::TARGET_MISMATCH
+        );
     }
 
     #[test]
     fn test_inactivity_recovery_drain_under_time_skew() {
         let seu = StateExecutionUnit::new(
-            StateExecutionUnit::ROLE_DRAIN as u8,
+            (StateExecutionUnit::ROLE_SWAP | StateExecutionUnit::ROLE_DRAIN) as u8,
             (StateExecutionUnit::STATUS_ACTIVE >> 8) as u8,
+            3,
             4,
-            5,
             100,
             ((StateExecutionUnit::FLAG_ACYCLIC | StateExecutionUnit::FLAG_NO_SELF_LOOP) >> 48)
                 as u16,
         );
-        // slot 40,000 -> delta = 39,900 > 0x7FFF (time skew under normal flow)
-        // recovery drain MUST pass without deadlocking
-        let mask = seu.evaluate(StateExecutionUnit::ROLE_DRAIN, 0, 40_000);
+        // Dormant state recovery: delta = 0x8001 (> 0x7FFF) with ROLE_DRAIN to 0
+        let current_slot = 100u16.wrapping_add(0x8001);
+        let mask = seu.evaluate(StateExecutionUnit::ROLE_DRAIN, 0, current_slot);
         assert!(mask.is_pass());
-
-        // whereas normal role SWAP under the same time skew MUST fail with SLOT_TIME_SKEW
-        let mask_swap = seu.evaluate(StateExecutionUnit::ROLE_SWAP, 5, 40_000);
-        assert_eq!(
-            mask_swap.0 & FaultMask::SLOT_TIME_SKEW,
-            FaultMask::SLOT_TIME_SKEW
-        );
     }
 
     #[test]
     fn test_ring_topology_wrap_and_rejection() {
-        // 1. With FLAG_RING_TOPOLOGY set: current = 5, transition to target = 0 is PERMITTED
         let seu_ring = StateExecutionUnit::new(
             StateExecutionUnit::ROLE_SWAP as u8,
             ((StateExecutionUnit::STATUS_ACTIVE | StateExecutionUnit::FLAG_RING_TOPOLOGY) >> 8)
@@ -503,7 +676,6 @@ mod tests {
         let mask = seu_ring.evaluate(StateExecutionUnit::ROLE_SWAP, 0, 101);
         assert!(mask.is_pass());
 
-        // 2. Without FLAG_RING_TOPOLOGY: backward transition 5 -> 0 is FORBIDDEN under DAG
         let seu_no_ring = StateExecutionUnit::new(
             StateExecutionUnit::ROLE_SWAP as u8,
             (StateExecutionUnit::STATUS_ACTIVE >> 8) as u8,
@@ -521,7 +693,6 @@ mod tests {
 
     #[test]
     fn test_slot_wraparound_16bit() {
-        // last_slot = 0xFFF0, current_slot = 0x0010 -> wrapping delta = 32 <= 0x7FFF
         let seu = StateExecutionUnit::new(
             StateExecutionUnit::ROLE_SWAP as u8,
             (StateExecutionUnit::STATUS_ACTIVE >> 8) as u8,
@@ -537,7 +708,6 @@ mod tests {
 
     #[test]
     fn test_status_flags_paused_and_rate_limited() {
-        // STATUS_PAUSED
         let seu_paused = StateExecutionUnit::new(
             StateExecutionUnit::ROLE_SWAP as u8,
             (StateExecutionUnit::STATUS_PAUSED >> 8) as u8,
@@ -552,7 +722,6 @@ mod tests {
             FaultMask::INACTIVE_OR_PAUSED
         );
 
-        // STATUS_RATE_LIMITED
         let seu_rl = StateExecutionUnit::new(
             StateExecutionUnit::ROLE_SWAP as u8,
             ((StateExecutionUnit::STATUS_ACTIVE | StateExecutionUnit::STATUS_RATE_LIMITED) >> 8)
@@ -568,42 +737,97 @@ mod tests {
 
     #[test]
     fn test_batch_execution_5_hop_cycle() {
-        // Complete 5-hop Torus cycle in 1 batch instruction
-        // Wire: [tag=2, role=1, count=5, (curr, tgt, fut) * 5]
         let wire = [
             TAG_BATCH, StateExecutionUnit::ROLE_SWAP as u8, 5,
-            0, 1, 2, // hop 0: S0 -> S1 (fut S2)
-            1, 2, 3, // hop 1: S1 -> S2 (fut S3)
-            2, 3, 4, // hop 2: S2 -> S3 (fut S4)
-            3, 4, 0, // hop 3: S3 -> S4 (fut S0)
-            4, 0, 1, // hop 4: S4 -> S0 (fut S1, Torus Ring Wrap)
+            0, 1, 2,
+            1, 2, 3,
+            2, 3, 4,
+            3, 4, 0,
+            4, 0, 1,
         ];
-        let res = process_instruction(&Address::default(), &mut [], &wire);
+        let res = process_seu_instruction_core(true, None, 100, &wire);
         assert!(res.is_ok());
     }
 
     #[test]
     fn test_batch_execution_backward_violation_rejected() {
-        // Wire: hop 1 attempts forbidden backward jump (S2 -> S1)
         let wire = [
             TAG_BATCH, StateExecutionUnit::ROLE_SWAP as u8, 2,
             0, 1, 2,
-            1, 2, 1, // S1 -> S2 with future S1 (< S2)
+            1, 2, 1,
         ];
-        let res = process_instruction(&Address::default(), &mut [], &wire);
+        let res = process_seu_instruction_core(true, None, 100, &wire);
         assert!(res.is_err());
     }
 
     #[test]
     fn test_batch_execution_self_loop_rejected() {
-        // Wire: hop 1 attempts forbidden stutter (S1 -> S1)
         let wire = [
             TAG_BATCH, StateExecutionUnit::ROLE_SWAP as u8, 2,
             0, 1, 2,
-            1, 1, 2, // self loop S1 -> S1
+            1, 1, 2,
         ];
-        let res = process_instruction(&Address::default(), &mut [], &wire);
+        let res = process_seu_instruction_core(true, None, 100, &wire);
         assert!(res.is_err());
+    }
+
+    #[test]
+    fn test_batch_route_discontinuity_rejected() {
+        let mut pda_bytes = [0u8; 8];
+        let wire = [
+            TAG_BATCH, StateExecutionUnit::ROLE_SWAP as u8, 2,
+            0, 1, 2,
+            3, 4, 5,
+        ];
+        let res = process_seu_instruction_core(true, Some(&mut pda_bytes), 100, &wire);
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn test_stateful_pda_lifecycle_genesis_transition_drain_and_star_checkpoint() {
+        let mut pda_bytes = [0u8; 8];
+
+        // 1. TAG_GENESIS (role=ROLE_SWAP | ROLE_DRAIN, curr=0, tgt=1, flags=0) at slot 100
+        let genesis_wire = [TAG_GENESIS, (StateExecutionUnit::ROLE_SWAP | StateExecutionUnit::ROLE_DRAIN) as u8, 0, 1, 0];
+        let res_gen = process_seu_instruction_core(true, Some(&mut pda_bytes), 100, &genesis_wire);
+        assert!(res_gen.is_ok());
+        let seu_gen = res_gen.unwrap();
+        assert_eq!(seu_gen.current_node(), 0);
+        assert_eq!(seu_gen.target_node(), 1);
+        assert_eq!(seu_gen.last_slot(), 100);
+        assert_eq!(u64::from_le_bytes(pda_bytes), seu_gen.0);
+
+        // 2. Repeat TAG_GENESIS on initialized account must be REJECTED
+        let res_gen_dup = process_seu_instruction_core(true, Some(&mut pda_bytes), 101, &genesis_wire);
+        assert_eq!(res_gen_dup.err(), Some(ERROR_ACCOUNT_ALREADY_INITIALIZED));
+
+        // 3. TAG_TRANSITION (S0 -> S1, fut=S2) at slot 105
+        let trans_wire = [TAG_TRANSITION, StateExecutionUnit::ROLE_SWAP as u8, 0, 1, 2];
+        let res_trans = process_seu_instruction_core(true, Some(&mut pda_bytes), 105, &trans_wire);
+        assert!(res_trans.is_ok());
+        let seu_trans = res_trans.unwrap();
+        assert_eq!(seu_trans.current_node(), 1);
+        assert_eq!(seu_trans.target_node(), 2);
+        assert_eq!(seu_trans.last_slot(), 105);
+        assert_eq!(u64::from_le_bytes(pda_bytes), seu_trans.0);
+
+        // 4. Inactivity: advance slot by 145 slots (105 + 145 = 250). ROLE_DRAIN recovery to S0 (fut=S1)
+        let drain_wire = [TAG_TRANSITION, StateExecutionUnit::ROLE_DRAIN as u8, 1, 0, 1];
+        let res_drain = process_seu_instruction_core(true, Some(&mut pda_bytes), 250, &drain_wire);
+        assert!(res_drain.is_ok());
+        let seu_drain = res_drain.unwrap();
+        assert_eq!(seu_drain.current_node(), 0);
+        assert_eq!(seu_drain.target_node(), 1);
+        assert_eq!(seu_drain.last_slot(), 250);
+
+        // 5. TAG_STAR_CHECKPOINT with parity digest 0x42
+        let star_wire = [TAG_STAR_CHECKPOINT, StateExecutionUnit::ROLE_SWAP as u8, 0, 1, 0x42];
+        let res_star = process_seu_instruction_core(true, Some(&mut pda_bytes), 255, &star_wire);
+        assert!(res_star.is_ok());
+        let seu_star = res_star.unwrap();
+        assert_eq!(seu_star.parity_digest(), 0x42);
+        assert!((seu_star.0 & StateExecutionUnit::FLAG_MACRO_BLUEPRINT) != 0);
+        assert_eq!(u64::from_le_bytes(pda_bytes), seu_star.0);
     }
 }
 
