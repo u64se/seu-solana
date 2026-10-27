@@ -133,6 +133,16 @@ impl StateExecutionUnit {
     }
 
     #[inline(always)]
+    pub const fn is_uninitialized(&self) -> bool {
+        self.0 == 0
+    }
+
+    #[inline(always)]
+    pub const fn epoch_slot(&self) -> u16 {
+        self.last_slot()
+    }
+
+    #[inline(always)]
     pub const fn current_node(&self) -> u8 {
         ((self.0 >> Self::CURRENT_NODE_SHIFT) & Self::NODE_BYTE_MASK) as u8
     }
