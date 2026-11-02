@@ -23,6 +23,20 @@ pub use u64se_seu_solana::StateExecutionUnit;
 
 pub const COMPUTE_BUDGET_ID: &str = "ComputeBudget111111111111111111111111111111";
 pub const MEMO_PROGRAM_ID: &str = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr";
+pub const SYSTEM_PROGRAM_ID: &str = "11111111111111111111111111111111";
+pub const JITO_TIP_PROGRAM_ID: &str = "T1pyyaTNZsKv2WcRAB8oVnk93mLJw2XzjtVYqCsaHqt";
+
+/// Known Jito tip accounts used for MEV bundle tip payments
+pub const JITO_TIP_ACCOUNTS: &[&str] = &[
+    "96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5",
+    "HFqU5x63VTqvQss8hp11i4wVV8bD44PvwucfZ2bU7gRe",
+    "Cw8CFyM9FkoMi7K7Crnq6HNQqf4uAzNWb46wWVmTUD5q",
+    "ADaUMid9yfUytqMBgopwjb2DTLSokTSzL1zt6iGPaS49",
+    "DfXygSm4jCyNCybVYYK6DwvWqjKee8pbDmJGcLWNDXjh",
+    "ADuUkR4vqLUMWXxW9gh6D6L8pMSawimctcNZ5pGwDcEt",
+    "DttWaMuVvTiduZRnguLF7jNxTgiMBZ1hyAumKUiL2KRL",
+    "3AVi9Tg9Uo68tJfuvoKvqKNWKkC5wPdSSdeBnizKZ6jT",
+];
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ProbeLogRecord {
@@ -178,6 +192,88 @@ pub fn build_signed_probe_tx(
     Ok((sig_b58, BASE64.encode(&wire)))
 }
 
+/// Build and sign a deterministic Solana transaction calibrated for sub-2,000 CU execution.
+///
+/// Uses an ultra-lean self-ping (< 300 CU total) to faithfully model `u64se-seu-solana`
+/// (< 1,900 CU state transitions) under tight `ComputeUnitLimit(1900..2500)` budgets.
+pub fn build_signed_seu_checkpoint_tx(
+    keypair: &Keypair,
+    recent_blockhash_b58: &str,
+    cu_limit: u32,
+    price_micro_lamports: u64,
+) -> Result<(String, String), String> {
+    let payer_bytes = keypair.public.to_bytes();
+    let compute_budget_bytes = bs58::decode(COMPUTE_BUDGET_ID)
+        .into_vec()
+        .map_err(|e| e.to_string())?;
+    let system_prog_bytes = bs58::decode(SYSTEM_PROGRAM_ID)
+        .into_vec()
+        .map_err(|e| e.to_string())?;
+    let blockhash_bytes = bs58::decode(recent_blockhash_b58)
+        .into_vec()
+        .map_err(|e| e.to_string())?;
+
+    if blockhash_bytes.len() != 32 {
+        return Err("Invalid recent blockhash length".to_string());
+    }
+
+    let mut msg = Vec::with_capacity(256);
+    // Message Header: 1 signer, 0 readonly signed, 2 readonly unsigned (compute budget, system program)
+    msg.push(1u8);
+    msg.push(0u8);
+    msg.push(2u8);
+
+    // Compact-u16 length of account_keys = 3 (payer, compute_budget, system_program)
+    msg.push(3u8);
+    msg.extend_from_slice(&payer_bytes);
+    msg.extend_from_slice(&compute_budget_bytes);
+    msg.extend_from_slice(&system_prog_bytes);
+
+    // Recent blockhash (32 bytes)
+    msg.extend_from_slice(&blockhash_bytes);
+
+    // Instructions count
+    let ix_count = if price_micro_lamports > 0 { 3u8 } else { 2u8 };
+    msg.push(ix_count);
+
+    // Instruction 0: ComputeBudget::SetComputeUnitLimit (discriminant = 2, u32 LE)
+    msg.push(1u8); // program_id_index = 1 (ComputeBudget)
+    msg.push(0u8); // accounts len = 0
+    msg.push(5u8); // data len = 5
+    msg.push(2u8); // SetComputeUnitLimit tag
+    msg.extend_from_slice(&cu_limit.to_le_bytes());
+
+    // Instruction 1 (optional): ComputeBudget::SetComputeUnitPrice
+    if price_micro_lamports > 0 {
+        msg.push(1u8); // program_id_index = 1 (ComputeBudget)
+        msg.push(0u8); // accounts len = 0
+        msg.push(9u8); // data len = 9
+        msg.push(3u8); // SetComputeUnitPrice tag
+        msg.extend_from_slice(&price_micro_lamports.to_le_bytes());
+    }
+
+    // Final Instruction: SystemProgram::Transfer(0 lamports) - from payer to payer (150 CU)
+    msg.push(2u8); // program_id_index = 2 (System Program)
+    msg.push(2u8); // accounts len = 2 (payer as funding, payer as recipient)
+    msg.push(0u8); // account index 0 (payer)
+    msg.push(0u8); // account index 0 (payer)
+    msg.push(12u8); // data len = 12
+    msg.extend_from_slice(&2u32.to_le_bytes()); // tag = 2 (Transfer)
+    msg.extend_from_slice(&0u64.to_le_bytes()); // lamports = 0
+
+    // Ed25519 signature over message
+    let sig = keypair.sign(&msg);
+    let sig_b58 = bs58::encode(sig.to_bytes()).into_string();
+
+    // Wire transaction: [compact-u16(1), 64-byte signature, message...]
+    let mut wire = Vec::with_capacity(1 + 64 + msg.len());
+    wire.push(1u8);
+    wire.extend_from_slice(&sig.to_bytes());
+    wire.extend_from_slice(&msg);
+
+    Ok((sig_b58, BASE64.encode(&wire)))
+}
+
 pub fn load_solana_keypair(path: &str) -> Result<Keypair, String> {
     let raw = fs::read_to_string(path)
         .map_err(|e| format!("Failed to read keypair {}: {}", path, e))?;
@@ -203,25 +299,36 @@ pub fn rpc_call(rpc_url: &str, method: &str, params: Value) -> Result<Value, Str
         "params": params,
     });
 
-    for attempt in 0..5 {
+    for attempt in 0..8 {
         let resp = ureq::post(rpc_url)
             .set("Content-Type", "application/json")
             .set("User-Agent", "u64se-block-order/0.2")
-            .timeout(Duration::from_secs(15))
+            .timeout(Duration::from_secs(20))
             .send_json(payload.clone());
 
         match resp {
             Ok(r) => {
                 let body: Value = r.into_json().map_err(|e| e.to_string())?;
                 if let Some(err) = body.get("error") {
+                    let err_str = err.to_string();
+                    if attempt < 7 && (err_str.contains("429") || err_str.contains("Too many") || err_str.contains("behind") || err_str.contains("rate")) {
+                        thread::sleep(Duration::from_millis(1000 * (attempt + 1) as u64));
+                        continue;
+                    }
                     return Err(format!("RPC {} error: {}", method, err));
                 }
                 return Ok(body["result"].clone());
             }
             Err(ureq::Error::Status(429, _)) | Err(ureq::Error::Transport(_)) => {
-                thread::sleep(Duration::from_millis(600 * (attempt + 1)));
+                thread::sleep(Duration::from_millis(1200 * (attempt + 1) as u64));
             }
-            Err(e) => return Err(format!("HTTP error on {}: {}", method, e)),
+            Err(e) => {
+                if attempt < 7 {
+                    thread::sleep(Duration::from_millis(1000 * (attempt + 1) as u64));
+                    continue;
+                }
+                return Err(format!("HTTP error on {}: {}", method, e));
+            }
         }
     }
     Err(format!("RPC {} exhausted retries", method))

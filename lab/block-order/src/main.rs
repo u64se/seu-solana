@@ -10,8 +10,9 @@ use std::{
     thread,
 };
 use u64se_block_order::{
-    build_signed_probe_tx, classify_client_family, ephemeral_simulation_keypair, kendall_tau,
-    load_solana_keypair, now_unix_secs, pack_probe_seu, rpc_call, seu_from_memo, seu_to_memo,
+    build_signed_probe_tx, build_signed_seu_checkpoint_tx, classify_client_family,
+    ephemeral_simulation_keypair, kendall_tau, load_solana_keypair, now_unix_secs, pack_probe_seu,
+    rpc_call, seu_from_memo, seu_to_memo, JITO_TIP_ACCOUNTS, JITO_TIP_PROGRAM_ID,
     ProbeLogRecord, VerifiedProbeRow,
 };
 
@@ -30,6 +31,7 @@ OPTIONS:
 SUBCOMMANDS:
   radar                       Discover Mainnet validator client families & leader windows (0 SOL)
   burst                       Fire calibrated 5-tx inverted probe burst (Dry-Run by default)
+      --preset <NAME>         Preset mode: 'seu-checkpoint' (sub-2,000 CU ladder: 1,900..2,500 CU)
       --axis <A|B>            Axis A (CU limit density @ 5000L) or Axis B (Priority Fee tiers)
       --burst-id <N>          8-bit burst identifier [default: 0]
       --live                  Broadcast live transactions (protected by SpendGuard)
@@ -57,6 +59,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut subcmd = String::new();
     let mut axis = "A".to_string();
+    let mut preset = String::new();
     let mut burst_id: u8 = 0;
     let mut live = false;
     let mut max_spend_lamports: u64 = 1_500_000;
@@ -65,6 +68,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
+            "--preset" => {
+                i += 1;
+                if i < args.len() {
+                    preset = args[i].clone();
+                }
+            }
             "--rpc" | "-r" => {
                 i += 1;
                 if i < args.len() {
@@ -190,7 +199,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .unwrap_or(0);
             println!("Current slot: {}", initial_slot);
 
-            let configs: Vec<(u32, u64, u8)> = if axis == "A" {
+            let is_seu_preset = preset == "seu-checkpoint";
+            let configs: Vec<(u32, u64, u8)> = if is_seu_preset {
+                println!("--- [PRESET: SEU-CHECKPOINT (1,900..2,500 CU)] ---");
+                println!("Calibrating tight sub-2,000 CU limit ladder to benchmark Banking Stage packing vs Jito MEV cutoff line");
+                println!("At 5,000 L flat fee: 2,000 CU yields 2.50 L/CU reward density (100x vs 200k CU transactions)");
+                vec![
+                    (2_500, 0, 0),
+                    (2_200, 0, 1),
+                    (2_000, 0, 2),
+                    (1_950, 0, 3),
+                    (1_900, 0, 4),
+                ]
+            } else if axis == "A" {
                 vec![
                     (300_000, 0, 0),
                     (150_000, 0, 1),
@@ -231,13 +252,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .ok_or("Missing blockhash")?
                 .to_string();
 
-            let axis_code = if axis == "A" { 1u8 } else { 2u8 };
+            let axis_code = if is_seu_preset { 3u8 } else if axis == "A" { 1u8 } else { 2u8 };
             let mut built = Vec::new();
             for (cu_limit, price, rank) in configs {
                 let seu = pack_probe_seu(1, axis_code, burst_id, rank, initial_slot);
-                let memo_str = seu_to_memo(seu);
-                let (sig_b58, wire_b64) =
-                    build_signed_probe_tx(&payer, &blockhash, cu_limit, price, &memo_str)?;
+                let memo_str = if is_seu_preset {
+                    format!("u64se:checkpoint:0x{:016X}", seu.0)
+                } else {
+                    seu_to_memo(seu)
+                };
+                let (sig_b58, wire_b64) = if is_seu_preset {
+                    build_signed_seu_checkpoint_tx(&payer, &blockhash, cu_limit, price)?
+                } else {
+                    build_signed_probe_tx(&payer, &blockhash, cu_limit, price, &memo_str)?
+                };
                 built.push((rank, cu_limit, price, seu, memo_str, sig_b58, wire_b64));
             }
 
@@ -335,21 +363,80 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .ok_or("Missing transactions array")?;
             println!("Total transactions in block {}: {}", verify_slot, txs.len());
 
+            // Scan for Jito bundles in the block
+            let mut jito_tx_indices = Vec::new();
+            for (idx, tx) in txs.iter().enumerate() {
+                let tx_str = tx.to_string();
+                if JITO_TIP_ACCOUNTS.iter().any(|tip_acc| tx_str.contains(tip_acc))
+                    || tx_str.contains(JITO_TIP_PROGRAM_ID)
+                {
+                    jito_tx_indices.push(idx);
+                }
+            }
+            let jito_cutoff = jito_tx_indices.last().copied();
+            if let Some(cutoff) = jito_cutoff {
+                println!(
+                    "  [JITO MEV DETECTED] Found {} Jito tip transactions across block (Cutoff line: index {:04}/{} | {:.1}%):",
+                    jito_tx_indices.len(),
+                    cutoff,
+                    txs.len(),
+                    (cutoff as f64 / txs.len() as f64) * 100.0
+                );
+                println!("    -> Jito Tip Indices: {:?}", jito_tx_indices);
+            } else {
+                println!("  [JITO MEV] No out-of-protocol Jito tip transactions detected in slot {}", verify_slot);
+            }
+
             for (idx, tx) in txs.iter().enumerate() {
                 let tx_str = tx.to_string();
                 if let Some(seu) = seu_from_memo(&tx_str) {
                     let status = ((seu.0 >> 8) & 0xFF) as u8;
+                    let (burst_id, rank, axis_label) = if status == 1 {
+                        (seu.current_node(), seu.target_node(), "Axis A (CU Density)".to_string())
+                    } else if status == 2 {
+                        (seu.current_node(), seu.target_node(), "Axis B (Priority Fee)".to_string())
+                    } else if status == 3 {
+                        (seu.current_node(), seu.target_node(), "SEU Checkpoint (<2k CU)".to_string())
+                    } else {
+                        // Legacy Burst 200 format (burst in byte 1, rank in byte 2 low nibble)
+                        let legacy_burst = status;
+                        let legacy_rank = seu.current_node() & 0x0F;
+                        (legacy_burst, legacy_rank, format!("Legacy Burst (code {})", status))
+                    };
+
                     println!(
-                        "  [Block Index: {:04}/{}] Burst: {} | Rank: {} | Axis: {} | SlotLow16: {} | Parity: 0x{:02X} | SEU: 0x{:016X}",
+                        "  [Block Index: {:04}/{}] Burst: {} | Rank: {} | {} | SlotLow16: {} | Parity: 0x{:02X} | SEU: 0x{:016X}",
                         idx,
                         txs.len(),
-                        seu.current_node(),
-                        seu.target_node(),
-                        status,
+                        burst_id,
+                        rank,
+                        axis_label,
                         seu.last_slot(),
                         seu.parity_digest(),
                         seu.0
                     );
+
+                    if !jito_tx_indices.is_empty() {
+                        let jito_before = jito_tx_indices.iter().filter(|&&j_idx| j_idx < idx).count();
+                        let jito_after = jito_tx_indices.iter().filter(|&&j_idx| j_idx > idx).count();
+                        if let Some(cutoff) = jito_cutoff {
+                            if idx > cutoff {
+                                println!(
+                                    "      └─ Banking Stage: +{} positions behind Jito MEV cutoff line (relative pos: {:5.1}%, {} Jito bundles ahead)",
+                                    idx - cutoff,
+                                    (idx as f64 / txs.len() as f64) * 100.0,
+                                    jito_before
+                                );
+                            } else {
+                                println!(
+                                    "      └─ MEV Infiltration: Outpaced {} of {} Jito bundles in block! (Ahead of Jito txs: {:?})",
+                                    jito_after,
+                                    jito_tx_indices.len(),
+                                    jito_tx_indices.iter().filter(|&&j| j > idx).copied().collect::<Vec<_>>()
+                                );
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -392,6 +479,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mut leader_cache: HashMap<u64, String> = HashMap::new();
 
             for r in &live_records {
+                thread::sleep(std::time::Duration::from_millis(200));
                 let tx_info = match rpc_call(
                     &rpc_url,
                     "getTransaction",
