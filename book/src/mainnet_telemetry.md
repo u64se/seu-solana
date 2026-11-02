@@ -2,6 +2,8 @@
 
 All measurements below were conducted on **Solana Mainnet-Beta** during **Epoch 1073 (Post-Alpenglow)**. Validator software versions were queried directly from Mainnet gossip (`getClusterNodes`) and cross-referenced with `getLeaderSchedule`.
 
+> **Live Interactive Matrix**: You can interactively filter and inspect all 20 probes across relative block positions on the [Live Telemetry Visualizer](https://seu-solana.rag.engineering/block-ordering.html).
+
 ---
 
 ## 1. Validator Client Distribution

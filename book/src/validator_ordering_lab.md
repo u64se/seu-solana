@@ -11,6 +11,7 @@
   - `Frankendancer / Firedancer 26.10.5`
 - **Total Mainnet Spend**: **`0.001017 SOL`** (across 20 live Mainnet probe transactions, strictly bounded by an atomic `SpendGuard` limit of `0.0015 SOL`)
 - **Formal Guarantee**: Backed by **Theorems 13, 14, and 15** in [`verify_invariants.smt2`](https://github.com/u64se/seu-solana/blob/main/verify_invariants.smt2).
+- **Interactive Telemetry Visualizer**: [seu-solana.rag.engineering/block-ordering.html](https://seu-solana.rag.engineering/block-ordering.html)
 
 ---
 
