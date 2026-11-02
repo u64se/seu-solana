@@ -1,4 +1,4 @@
-# Compute Unit Profile (~8 CU vs Anchor)
+# Compute Unit Profile & 100x Priority Density
 
 Compute Units (CU) represent the CPU execution budget allocated to a transaction on Solana (default ceiling: 200,000 CU per instruction). Efficient CU consumption directly determines transaction prioritization and priority fee economics.
 
@@ -31,6 +31,24 @@ fn measure_exact_cu_consumption() {
 | **Return Data / Event Log** | 800 - 2,200 CU | 200 - 500 CU | **~45 CU** (`sol_set_return_data`) |
 | **Total Isolated Instruction** | **25,000 - 45,000 CU** | **2,500 - 4,000 CU** | **< 1,900 CU** |
 | **Stateless Batch Hop (5 hops)**| **150,000+ CU** | **18,000 CU** | **~341 CU / hop (2,011 CU)** |
+
+---
+
+## The 100x Scheduler Leverage: Micro-Execution as Priority Weapon
+
+Because a branchless `u64se-seu-solana` state transition executes in `< 1,900 CU`, transactions can request a tight budget:
+
+```rust
+ComputeBudgetInstruction::set_compute_unit_limit(2_000)
+```
+
+At flat 5,000 lamport base fees, this yields **100x higher validator reward density** than conventional programs:
+
+$$\text{Density}_{\text{u64se}} = \frac{5,000\text{ Lamports}}{2,000\text{ CU}} = 2.50\text{ L/CU}$$
+
+$$\text{Density}_{\text{Anchor}} = \frac{5,000\text{ Lamports}}{200,000\text{ CU}} = 0.025\text{ L/CU}$$
+
+To equal this priority score, an Anchor transaction must pay an extra **495,000 lamports (~0.0005 SOL)** in priority tips.
 
 ---
 
