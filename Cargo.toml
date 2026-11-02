@@ -33,3 +33,6 @@ solana = ["dep:pinocchio", "dep:solana-address", "dep:solana-define-syscall"]
 no-entrypoint = []
 bytemuck = ["dep:bytemuck"]
 std = []
+
+[workspace]
+exclude = ["svm-tests", "lab/block-order"]

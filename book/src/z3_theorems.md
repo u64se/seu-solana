@@ -1,6 +1,6 @@
 # Z3 SMT-LIB2 Theorems (QF_BV)
 
-All 8 theorems are codified in [`verify_invariants.smt2`](https://github.com/u64se/seu-solana/blob/main/verify_invariants.smt2).
+All 15 theorems are codified in [`verify_invariants.smt2`](https://github.com/u64se/seu-solana/blob/main/verify_invariants.smt2).
 
 ---
 
@@ -16,6 +16,13 @@ All 8 theorems are codified in [`verify_invariants.smt2`](https://github.com/u64
 | **Th 6** | **Temporal Monotonicity** | $\Delta_{\text{slot}} > \text{0x7FFF} \implies \text{FaultMask} \ne 0$ | **`unsat`** |
 | **Th 7** | **Deterministic Ring Wrap** | $\text{Wrap} \implies (S_i > 0 \land S_{i+1} = 0 \land \text{FLAG\_RING})$ | **`unsat`** |
 | **Th 8** | **Forward Projection Safety** | Future coordinate $S_{i+2}$ conforms strictly to graph topology | **`unsat`** |
+| **Th 9** | **Incremental XOR Crystal Parity** | Adjoint $O(1)$ XOR update preserves full 91-cube crystal parity | **`unsat`** |
+| **Th 10** | **Single-Cube Tamper Detection** | Any single-cube bit flip alters header parity digest | **`unsat`** |
+| **Th 11** | **Lock-Free SeqLock Exclusion** | Torn reads rejected during `STATUS_SEQLOCK_WRITING` | **`unsat`** |
+| **Th 12** | **SPSC Command Ring Safety** | Empty and full ring boundaries distinguished deterministically | **`unsat`** |
+| **Th 13** | **Probe Packing Bijection** | 64-bit `(cohort, axis, burst_id, send_rank, slot16, parity)` packing is strictly injective | **`unsat`** |
+| **Th 14** | **Axis-A Priority Monotonicity** | Lower requested `CU limit` strictly increases scheduler reward density at `5,000 L` base fee | **`unsat`** |
+| **Th 15** | **SpendGuard Overflow Freedom** | `5000 + (cu_limit * cu_price) / 1e6` never overflows `u64` across valid Solana bounds | **`unsat`** |
 
 ---
 
@@ -54,7 +61,7 @@ Running the verification:
 ```bash
 z3 verify_invariants.smt2
 ```
-Output:
+Output (`15 x unsat`):
 ```
 unsat
 unsat
@@ -64,5 +71,12 @@ unsat
 unsat
 unsat
 unsat
+unsat
+unsat
+unsat
+unsat
+unsat
+unsat
+unsat
 ```
-All 8 mathematical theorems are proven unconditionally.
+All 15 mathematical and block-ordering theorems are proven unconditionally.

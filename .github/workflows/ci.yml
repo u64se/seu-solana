@@ -20,7 +20,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y z3
 
-      - name: Verify 8 Core Mathematical Invariants
+      - name: Verify 15 Mathematical & Block-Ordering Invariants
         run: |
           echo "Running Z3 on verify_invariants.smt2..."
           output=$(z3 verify_invariants.smt2)
@@ -28,14 +28,14 @@ jobs:
           
           # Count proven theorems (unsat)
           unsat_count=$(echo "$output" | grep -c "^unsat$")
-          echo "Theorems proven: $unsat_count / 8"
-          if [ "$unsat_count" -ne 8 ]; then
-            echo "Error: Expected exactly 8 proven invariants (unsat), but got $unsat_count"
+          echo "Theorems proven: $unsat_count / 15"
+          if [ "$unsat_count" -ne 15 ]; then
+            echo "Error: Expected exactly 15 proven invariants (unsat), but got $unsat_count"
             exit 1
           fi
 
   rust-test:
-    name: Rust Host ALU & Unit Tests
+    name: Rust Host ALU, Block-Order-Lab & Unit Tests
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -44,11 +44,14 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Check compilation
+      - name: Check core crate compilation
         run: cargo check --release
 
-      - name: Run unit tests
+      - name: Run core unit tests
         run: cargo test --release -- --nocapture
 
       - name: Run host benchmark
         run: cargo run --release --example benchmark
+
+      - name: Check block-order-lab telemetry suite
+        run: cargo check --release --manifest-path lab/block-order/Cargo.toml

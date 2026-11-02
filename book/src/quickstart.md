@@ -84,4 +84,4 @@ cd seu-solana
 z3 verify_invariants.smt2
 ```
 
-All 8 QF_BV mathematical theorems will verify and return `unsat`.
+All 15 QF_BV mathematical and block-ordering theorems will verify and return `unsat`.

@@ -1,0 +1,12 @@
+services:
+  block-order-lab:
+    build:
+      context: ../..
+      dockerfile: lab/block-order/Dockerfile
+    environment:
+      - SOLANA_RPC_URL=${SOLANA_RPC_URL:-https://api.mainnet-beta.solana.com}
+      - SOLANA_KEYPAIR_PATH=${SOLANA_KEYPAIR_PATH:-/secrets/id.json}
+      - TELEMETRY_DIR=/app/telemetry
+    volumes:
+      - ./telemetry:/app/telemetry
+      - ${SOLANA_SECRETS_DIR:-./telemetry}:/secrets:ro

@@ -1,20 +1,15 @@
 # u64se-seu-solana
 
-[![CI](https://img.shields.io/github/actions/workflow/status/u64se/seu-solana/ci.yml?branch=main&style=flat-square&logo=github-actions&logoColor=white)](https://github.com/u64se/seu-solana/actions)
-[![Colosseum Hackathon](https://img.shields.io/badge/Colosseum-Flagship__Submission-orange?style=flat-square)](https://seu-solana.rag.engineering)
 [![Docs](https://img.shields.io/badge/docs-docs.u64se.rag.engineering-blue?style=flat-square)](https://docs.u64se.rag.engineering)
 [![State Size](https://img.shields.io/badge/state__size-8__bytes__(u64)-007acc?style=flat-square)](#specification)
 [![ALU Cost](https://img.shields.io/badge/ALU__cost-~8__CU-brightgreen?style=flat-square)](#specification)
 [![Binary Size](https://img.shields.io/badge/SBF__size-4%2C720__bytes-blueviolet?style=flat-square)](#specification)
-[![Devnet](https://img.shields.io/badge/Solana-Devnet__Live-14F195?style=flat-square&logo=solana&logoColor=black)](https://solana.fm/address/FCm2jTA6aiWqrfgtJQgBEZ5dyY9cfBXP8jas3TMTs19H?cluster=devnet-solana)
 
-Branchless 64-bit State Execution Unit (SEU) for Solana SVM.  
-**Superteam Ukraine · Colosseum Global Hackathon Flagship Submission** (Infrastructure & Developer Tooling).
+Branchless 64-bit State Execution Unit (SEU) for Solana SVM.
 
-- **Live Showcase**: [seu-solana.rag.engineering](https://seu-solana.rag.engineering)
-- **SVM Workbench**: [u64se.rag.engineering](https://u64se.rag.engineering)
 - **Documentation**: [docs.u64se.rag.engineering](https://docs.u64se.rag.engineering)
-- **Live Devnet Program**: [`FCm2jTA6aiWqrfgtJQgBEZ5dyY9cfBXP8jas3TMTs19H`](https://solana.fm/address/FCm2jTA6aiWqrfgtJQgBEZ5dyY9cfBXP8jas3TMTs19H?cluster=devnet-solana)
+- **SVM Workbench**: [u64se.rag.engineering](https://u64se.rag.engineering)
+- **Lab Module (`u64se-block-order`)**: [`lab/block-order`](lab/block-order) — *Validator Scheduler & Intra-Block Priority Telemetry Probe*
 
 ```
 +-------------------+-------------------+-------------------+-------------------+
@@ -49,7 +44,7 @@ Engineered for high-assurance Solana SVM programs, it executes with **zero heap 
 
 ## Status & Security Notice
 
-> **v0.1.0 — Experimental Research Primitive**: This codebase is an experimental prototype exploring constant-time branchless FSM execution and formal bit-vector verification on Solana SVM. While mathematical invariants are formally proven using the Z3 SMT solver and validated via Mollusk SVM, this software has not yet undergone an independent third-party commercial security audit. It is provided for evaluation, benchmarking, and architectural research.
+> **v0.2.0 — Experimental Research Primitive**: This codebase is an experimental prototype exploring constant-time branchless FSM execution, Mainnet validator block-ordering telemetry, and formal bit-vector verification on Solana SVM. While mathematical invariants are formally proven using the Z3 SMT solver and validated via Mollusk SVM, this software has not yet undergone an independent third-party commercial security audit. It is provided for evaluation, benchmarking, and architectural research.
 
 ---
 
@@ -58,7 +53,7 @@ Engineered for high-assurance Solana SVM programs, it executes with **zero heap 
 Verify formal mathematical proofs, run unit and fuzzing tests, and benchmark onchain execution in under a minute:
 
 ```bash
-# 1. Verify 8 formal mathematical invariants with Z3 (QF_BV)
+# 1. Verify 15 formal mathematical & block-ordering invariants with Z3 (QF_BV)
 z3 verify_invariants.smt2
 
 # 2. Run host ALU unit tests and Proptest fuzzing
@@ -150,10 +145,13 @@ All state transitions and algebraic topological constraints are formally verifie
 | **Theorem 10** | **Single-Cube Tamper Detection**: Any single-cube bit flip alters header parity digest | `QF_BV` | `unsat` (proven) |
 | **Theorem 11** | **Lock-Free SeqLock Exclusion**: Torn reads rejected during `STATUS_SEQLOCK_WRITING` | `QF_BV` | `unsat` (proven) |
 | **Theorem 12** | **SPSC Command Ring Safety**: Empty and full ring boundaries distinguished deterministically | `QF_BV` | `unsat` (proven) |
+| **Theorem 13** | **Probe Telemetry Packing Bijection**: `(cohort, axis, burst_id, send_rank, slot16, parity)` bit-packing is strictly injective | `QF_BV` | `unsat` (proven) |
+| **Theorem 14** | **Axis-A Scheduler Priority Monotonicity**: Lower requested `CU limit` strictly increases reward density at flat `5,000 L` base fee | `QF_BV` | `unsat` (proven) |
+| **Theorem 15** | **SpendGuard 64-Bit Overflow Freedom**: `5000 + (cu_limit * cu_price) / 1e6` never overflows `u64` for valid Solana bounds | `QF_BV` | `unsat` (proven) |
 
 Run the verification suite:
 ```bash
-z3 verify_invariants.smt2 # Expected: 12 x unsat
+z3 verify_invariants.smt2 # Expected: 15 x unsat
 ```
 
 ---

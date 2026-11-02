@@ -8,7 +8,7 @@ Traditional smart contract auditing relies on manual code reviews and dynamic fu
 
 ## The QF_BV SMT Logic
 
-All 8 safety invariants are codified into SMT-LIB2 format under the **Quantifier-Free Bit-Vector Theory (`QF_BV`)**. 
+All 15 safety and block-ordering invariants are codified into SMT-LIB2 format under the **Quantifier-Free Bit-Vector Theory (`QF_BV`)**. 
 
 Under `QF_BV`:
 - All variables are modeled as exact bit-vectors: `(_ BitVec 8)`, `(_ BitVec 16)`, `(_ BitVec 64)`.
