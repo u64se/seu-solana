@@ -2,9 +2,9 @@
 **`u64se-block-order` (`lab/block-order`) · Empirical Mainnet Telemetry via `u64se-seu-solana` 64-Bit Probe Registers**
 
 - **Network**: Solana Mainnet-Beta (Post-Alpenglow Upgrade, Epoch `1073`)
-- **Measurement Date & Window**: `2026-11-01 02:56:19 UTC` – `2026-11-01 03:09:07 UTC` (Slots `463,931,745` to `463,935,349`)
-- **Validator Coverage**: **7 distinct Mainnet validators** across **4 distinct client software versions** (`Agave 4.3.2`, `Agave 4.4.0`, `Agave 4.4.0-rc.1`, `Frankendancer / Firedancer 26.10.5`)
-- **Total Mainnet Spend**: **`0.000967 SOL`** (`967,000` lamports across 10 live Mainnet probe transactions — strictly within the `0.05 SOL` cap and enforced by an atomic `SpendGuard` default limit of `0.0015 SOL`)
+- **Measurement Date & Window**: `2026-11-01 02:56:19 UTC` – `2026-11-02 04:25:39 UTC` (Slots `463,931,745` to `464,360,092`)
+- **Validator Coverage**: **9 distinct Mainnet validators** across **4 distinct client software versions** (`Agave 4.3.2`, `Agave 4.4.0`, `Agave 4.4.0-rc.1`, `Frankendancer / Firedancer 26.10.5`)
+- **Total Mainnet Spend**: **`0.000992 SOL`** (`992,000` lamports across 15 live Mainnet probe transactions — strictly within the `0.05 SOL` cap and enforced by an atomic `SpendGuard` default limit of `0.0015 SOL`)
 - **Raw Verifiable Telemetry**: [`telemetry/probes.jsonl`](telemetry/probes.jsonl) & [`telemetry/verified_matrix.json`](telemetry/verified_matrix.json)
 - **Rust Crate & CLI Source**: [`src/lib.rs`](src/lib.rs) (reusable `u64se_block_order` library) & [`src/main.rs`](src/main.rs) (`block-order-lab` CLI)
 
@@ -23,7 +23,7 @@ docker compose run --rm block-order-lab burst --axis A --burst-id 0
 # 2. Verify intra-block ordering in Mainnet Slot 463935349 (Frankendancer v26.10.5) via getBlock
 docker compose run --rm block-order-lab verify --slot 463935349
 
-# 3. Recompute full 10-probe / 7-validator matrix & Kendall's tau rank correlation from Mainnet
+# 3. Recompute full 15-probe / 9-validator matrix & Kendall's tau rank correlation from Mainnet
 docker compose run --rm block-order-lab analyze
 ```
 
@@ -34,12 +34,16 @@ docker compose run --rm block-order-lab analyze
 Rather than treating Solana block production as a naive First-In-First-Out (FIFO) queue or a one-dimensional fee auction, this module injects deterministic, self-identifying probe transactions carrying a canonical 64-bit `StateExecutionUnit` register word (`u64se:probe:0x...`) directly into Mainnet leader windows.
 
 ### Key Empirical Results:
-1. **CU-Limit Reward Density Reordering at Zero Priority Fee (`Axis A`, $\tau = -1.000$):**
+1. **CU-Limit Reward Density Reordering at Zero Priority Fee (`Axis A`, $\tau = -1.000$ on both Agave & Frankendancer):**
     Validators running Agave and Frankendancer compute scheduler priority using reward density per requested Compute Unit:
    $$\text{Priority Score} \propto \frac{\text{Base Fee (5,000 L)} + \text{Priority Fee}}{\text{Requested CU Limit}}$$
-   In **Slot `463935349`** (Leader: `JUPiTERrZqgf...`, **Frankendancer v26.10.5**), two concurrent probe transactions paying the exact same **5,000 lamports base fee (0 priority fee)** landed in the same block:
-   - **Rank 4** (sent *later*, `30,000 CU` limit $\rightarrow 0.1667\text{ L/CU}$) captured block index **`39 / 189` (top 20.6%)**;
-   - **Rank 3** (sent *earlier*, `50,000 CU` limit $\rightarrow 0.1000\text{ L/CU}$) was pushed down to block index **`90 / 189` (47.6%)** — an intra-block inversion of **51 positions** ($\tau = -1.000$).
+   - **Frankendancer v26.10.5 (Slot `463935349`, Leader: `JUPiTERrZqgf...`):**
+     - **Rank 4** (sent *later*, `30,000 CU` limit $\rightarrow 0.1667\text{ L/CU}$) captured block index **`39 / 189` (top 20.6%)**;
+     - **Rank 3** (sent *earlier*, `50,000 CU` limit $\rightarrow 0.1000\text{ L/CU}$) was pushed down to block index **`90 / 189` (47.6%)** — an intra-block inversion of **51 positions** ($\tau = -1.000$).
+   - **Agave v4.3.2 (Slot `464360092`, Leader: `5Cchr1XGEg...`):**
+     - **Rank 4** (`30,000 CU` limit $\rightarrow 0.1667\text{ L/CU}$) captured block index **`42 / 176` (top 23.9%)**;
+     - **Rank 1** (`150,000 CU` limit $\rightarrow 0.0333\text{ L/CU}$) captured block index **`47 / 176` (26.7%)**;
+     - **Rank 0** (`300,000 CU` limit $\rightarrow 0.0167\text{ L/CU}$) was pushed down to block index **`52 / 176` (29.5%)** — strict reverse arrival ordering across all 3 concurrent probes ($\tau = -1.000$).
 2. **Priority Fee Auction Compression (`Axis B`):**
    Across fixed `35,000 CU` probes with ascending `SetComputeUnitPrice` (`0` to `20,000,000` µL/CU), high-priority probes (`1M` and `20M` µL/CU) systematically captured the top decile of their blocks (**`4.9%`** on `Agave 4.4.0-rc.1` and **`9.6%`** on `Agave 4.4.0`), whereas low-fee probes settled in the middle or tail (**`46.7%`–`91.4%`**).
 3. **Architectural Implication for `u64se-seu-solana`:**
@@ -47,9 +51,9 @@ Rather than treating Solana block production as a naive First-In-First-Out (FIFO
 
 ---
 
-## 2. Validator & Client Software Diversity (7 Validators, 4 Client Versions)
+## 2. Validator & Client Software Diversity (9 Validators, 4 Client Versions)
 
-All measurements were conducted on **Solana Mainnet-Beta** on **November 1, 2026 (post-Alpenglow upgrade)**. Validator software versions were queried live from Mainnet gossip (`getClusterNodes`) and cross-referenced with `getLeaderSchedule`.
+All measurements were conducted on **Solana Mainnet-Beta** on **November 1–2, 2026 (post-Alpenglow upgrade)**. Validator software versions were queried live from Mainnet gossip (`getClusterNodes`) and cross-referenced with `getLeaderSchedule`.
 
 | # | Validator Identity Pubkey | Client Family | Gossip Version | Probed Mainnet Slots |
 | :--- | :--- | :--- | :--- | :--- |
@@ -60,10 +64,12 @@ All measurements were conducted on **Solana Mainnet-Beta** on **November 1, 2026
 | **5** | `HEL1USMZKAL2odpNBj2oCjffnFGaYwmbGmyewGv1e2TU` | Agave Mainline | **`4.4.0`** | `463931765` |
 | **6** | `G3a3iYZKNLbivothF3twqcaTCEvoPb9uJ2bFc9DNKkBQ` | Agave / Jito-Solana | **`4.3.2`** | `463935347` |
 | **7** | `JUPiTERrZqgf1jUyR7dSkhMx4Kn2qJyekWsg3LT1h4b` | Frankendancer (Firedancer) | **`26.10.5`** | `463935348`, `463935349` |
+| **8** | `EkvdKhULbMFqjKBKotAzGi3kwMvMpYNDKJXXQQmi6C1f` | Agave / Jito-Solana | **`4.3.2`** | `464360091` |
+| **9** | `5Cchr1XGEg7dbBXByV5NY2ad8jfxAM7HA3x8D56rq9Ux` | Agave / Jito-Solana | **`4.3.2`** | `464360092` |
 
 ---
 
-## 3. Complete Verifiable Mainnet Telemetry Matrix (10 Live Transactions)
+## 3. Complete Verifiable Mainnet Telemetry Matrix (15 Live Transactions)
 
 Every transaction below can be independently verified via `docker compose run --rm block-order-lab verify --slot <SLOT>` or standard `getBlock` RPC calls.
 
@@ -88,6 +94,17 @@ Every transaction below can be independently verified via `docker compose run --
 | **Rank 2** | `463935348` | `98 / 160` | `61.25%` | `80,000` | `0.0625 L/CU` | `5,000` | `JUPiTERrZq...` | **`26.10.5`** | `0x001BA7177012C801` | [`3MQdqcYtmx...`](https://solscan.io/tx/3MQdqcYtmx77jpj194CrBjK9XtwNnLwQFuJEYQYL6YoPXh27er62N5yMBBDEp8EaWtKfagcHgC4NTAWSvFaEtw13) |
 | **Rank 3** | `463935349` | `90 / 189` | `47.62%` | `50,000` | `0.1000 L/CU` | `5,000` | `JUPiTERrZq...` | **`26.10.5`** | `0x001BA7177013C801` | [`Zykn7TJkPZ...`](https://solscan.io/tx/Zykn7TJkPZyvvyQq2xKAxM1oukjqGoaqpp3T4nfhoMLAnfDW6VRFnJicJXyUTQdsmZbjqXm4ZK45bunSCeMaHEG) |
 | **Rank 4** | `463935349` | `39 / 189` | **`20.63%`** | `30,000` | **`0.1667 L/CU`** | `5,000` | `JUPiTERrZq...` | **`26.10.5`** | `0x001BA7177014C801` | [`5zQsHiHaxM...`](https://solscan.io/tx/5zQsHiHaxMfB9fswwTQ3p3sBTBQP3QRfaPfZ1gvzxnthwaKQjgWbb7E4cor6JmCtQw1kRkg3UkBSPZ8KxRdP8pNv) |
+
+### Burst 201 · Axis A (Concurrent CU-Limit Reward Density Validation @ Flat `5,000` Lamport Base Fee)
+*Measurement timestamp: `2026-11-02T04:25:39Z` (Parallel multi-threaded injection across slots `464360091`–`464360092` proving Agave 4.3.2 intra-block reordering)*
+
+| Send Rank | Slot | Block Tx Index | Relative Position | CU Limit | Reward Density (L/CU) | Total Fee (L) | Validator Leader | Client Version | 64-Bit SEU Probe Word | Transaction Signature |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **Rank 0** | `464360092` | `52 / 176` | `29.55%` | `300,000` | `0.0167 L/CU` | `5,000` | `5Cchr1XGE...` | **`4.3.2`** | `0xC601929700C90101` | [`3z92ihtuby...`](https://solscan.io/tx/3z92ihtubyxbaQqE7KtKkwNv3Rw1VfRtqDwiwnvEeTACDKsXsxrnjgwBYPDmhbDWE8zwtTH4a6rpi3D7ELhmQom4) |
+| **Rank 1** | `464360092` | `47 / 176` | `26.70%` | `150,000` | `0.0333 L/CU` | `5,000` | `5Cchr1XGE...` | **`4.3.2`** | `0xD801929701C90101` | [`5MX8GQRi6H...`](https://solscan.io/tx/5MX8GQRi6H2tpR2rhJFGe7RHKaLu4CBuuFFcJQmjbzmjjifz9jHSHY9DHRXUGjACtkorz2eBFkmj4s7h3cQLAvg7) |
+| **Rank 2** | `464360091` | `190 / 198` | `95.96%` | `80,000` | `0.0625 L/CU` | `5,000` | `EkvdKhULb...` | **`4.3.2`** | `0xDB01929702C90101` | [`55GgohzZSL...`](https://solscan.io/tx/55GgohzZSLyCxFRuhfxw65h9DXZko1AZCP5yRtN4afY275e4yYjQNmS68XHQtsJxcXDkdP3Jksf9hxaXzF7vEW9H) |
+| **Rank 3** | `464360091` | `191 / 198` | `96.46%` | `50,000` | `0.1000 L/CU` | `5,000` | `EkvdKhULb...` | **`4.3.2`** | `0xDB01929703C90101` | [`66xbeGsMNh...`](https://solscan.io/tx/66xbeGsMNhFGbtBgk9UDPATXdsn8NpniGjQitrqeV77TaoSp9WFM5H1kpsR7L3DQFXngB55ML18XFdKG2Q36BKr2) |
+| **Rank 4** | `464360092` | `42 / 176` | **`23.86%`** | `30,000` | **`0.1667 L/CU`** | `5,000` | `5Cchr1XGE...` | **`4.3.2`** | `0xDD01929704C90101` | [`5t2iESM5uv...`](https://solscan.io/tx/5t2iESM5uvKAFfD5AguVqKKoRtLHybdZTcodergmTxpcXUo1UVFHGZA4vUs5JtK2DTPEiKEMdcL525b3QGAQ5BHM) |
 
 ---
 
